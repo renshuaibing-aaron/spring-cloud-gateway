@@ -1,4 +1,4 @@
-package org.springframework.cloud.gateway.sample;
+package com.aaron.ren.sample;
 
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
 import org.springframework.cloud.gateway.config.GatewayAutoConfiguration;

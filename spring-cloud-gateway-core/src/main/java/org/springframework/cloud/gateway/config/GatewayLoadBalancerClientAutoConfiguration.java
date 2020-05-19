@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.DispatcherHandler;
 
 /**
- * LoadBalancerClientFilter 初始化
+ * todo LoadBalancerClientFilter 初始化
  *
  * @author Spencer Gibb
  */
@@ -25,6 +25,8 @@ public class GatewayLoadBalancerClientAutoConfiguration {
 	@Bean
 	@ConditionalOnBean(LoadBalancerClient.class)
 	public LoadBalancerClientFilter loadBalancerClientFilter(LoadBalancerClient client) {
+
+		System.out.println("【LoadBalancerClientFilter 初始化】");
 		return new LoadBalancerClientFilter(client);
 	}
 

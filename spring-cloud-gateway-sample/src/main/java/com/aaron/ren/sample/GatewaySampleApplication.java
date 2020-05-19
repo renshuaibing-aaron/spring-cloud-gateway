@@ -1,4 +1,4 @@
-package org.springframework.cloud.gateway.sample;
+package com.aaron.ren.sample;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
@@ -26,10 +26,10 @@ import static org.springframework.cloud.gateway.handler.predicate.RoutePredicate
 import static org.springframework.cloud.gateway.handler.predicate.RoutePredicates.path;
 import static org.springframework.tuple.TupleBuilder.tuple;
 
-/**
- * @author Spencer Gibb
- */
+
 @SpringBootConfiguration
+
+//todo 注意这里因为spring-cloud-gateway-core 所以会引入gateway配置类 org.springframework.cloud.gateway.config
 @EnableAutoConfiguration
 @Import({Config.class, AdditionalRoutes.class})
 //@EnableDiscoveryClient // {@link DiscoveryClientRouteDefinitionLocator}

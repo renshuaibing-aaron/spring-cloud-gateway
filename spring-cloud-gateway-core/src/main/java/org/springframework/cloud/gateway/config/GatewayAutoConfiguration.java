@@ -1,6 +1,8 @@
 package org.springframework.cloud.gateway.config;
 
-import com.netflix.hystrix.HystrixObservableCommand;
+import java.util.List;
+import java.util.function.Consumer;
+
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.actuate.autoconfigure.web.ManagementContextConfiguration;
 import org.springframework.boot.actuate.health.Health;
@@ -13,42 +15,76 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.web.reactive.HttpHandlerAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.cloud.gateway.actuate.GatewayWebfluxEndpoint;
-import org.springframework.cloud.gateway.filter.*;
-import org.springframework.cloud.gateway.filter.factory.*;
+import org.springframework.cloud.gateway.filter.ForwardRoutingFilter;
+import org.springframework.cloud.gateway.filter.GlobalFilter;
+import org.springframework.cloud.gateway.filter.NettyRoutingFilter;
+import org.springframework.cloud.gateway.filter.NettyWriteResponseFilter;
+import org.springframework.cloud.gateway.filter.RouteToRequestUrlFilter;
+import org.springframework.cloud.gateway.filter.WebsocketRoutingFilter;
+import org.springframework.cloud.gateway.filter.factory.AddRequestHeaderGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.AddRequestParameterGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.AddResponseHeaderGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.GatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.HystrixGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.PrefixPathGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.RedirectToGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.RemoveNonProxyHeadersGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.RemoveRequestHeaderGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.RemoveResponseHeaderGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.RequestRateLimiterGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.RewritePathGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.SecureHeadersGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.SecureHeadersProperties;
+import org.springframework.cloud.gateway.filter.factory.SetPathGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.SetResponseHeaderGatewayFilterFactory;
+import org.springframework.cloud.gateway.filter.factory.SetStatusGatewayFilterFactory;
 import org.springframework.cloud.gateway.filter.ratelimit.KeyResolver;
 import org.springframework.cloud.gateway.filter.ratelimit.PrincipalNameKeyResolver;
 import org.springframework.cloud.gateway.filter.ratelimit.RateLimiter;
 import org.springframework.cloud.gateway.handler.FilteringWebHandler;
 import org.springframework.cloud.gateway.handler.RoutePredicateHandlerMapping;
-import org.springframework.cloud.gateway.handler.predicate.*;
-import org.springframework.cloud.gateway.route.*;
+import org.springframework.cloud.gateway.handler.predicate.AfterRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.BeforeRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.BetweenRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.CookieRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.HeaderRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.HostRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.MethodRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.PathRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.QueryRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.RemoteAddrRoutePredicateFactory;
+import org.springframework.cloud.gateway.handler.predicate.RoutePredicateFactory;
+import org.springframework.cloud.gateway.route.CachingRouteLocator;
+import org.springframework.cloud.gateway.route.CompositeRouteDefinitionLocator;
+import org.springframework.cloud.gateway.route.CompositeRouteLocator;
+import org.springframework.cloud.gateway.route.InMemoryRouteDefinitionRepository;
+import org.springframework.cloud.gateway.route.RouteDefinitionLocator;
+import org.springframework.cloud.gateway.route.RouteDefinitionRepository;
+import org.springframework.cloud.gateway.route.RouteDefinitionRouteLocator;
+import org.springframework.cloud.gateway.route.RouteDefinitionWriter;
+import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.web.reactive.DispatcherHandler;
-import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
 import org.springframework.web.reactive.socket.client.WebSocketClient;
 import org.springframework.web.reactive.socket.server.WebSocketService;
 import org.springframework.web.reactive.socket.server.support.HandshakeWebSocketService;
+
+import com.netflix.hystrix.HystrixObservableCommand;
+
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.ipc.netty.http.client.HttpClient;
 import reactor.ipc.netty.http.client.HttpClientOptions;
 import reactor.ipc.netty.resources.PoolResources;
 import rx.RxReactiveStreams;
 
-import java.util.List;
-import java.util.function.Consumer;
-
 /**
- * Gateway 模块自动装配类
  * @author Spencer Gibb
  */
 @Configuration
-@ConditionalOnProperty(name = "spring.cloud.gateway.enabled", matchIfMissing = true) // 默认开启
+@ConditionalOnProperty(name = "spring.cloud.gateway.enabled", matchIfMissing = true)
 @EnableConfigurationProperties
 @AutoConfigureBefore(HttpHandlerAutoConfiguration.class)
 @AutoConfigureAfter({GatewayLoadBalancerClientAutoConfiguration.class, GatewayClassPathWarningAutoConfiguration.class})
@@ -58,13 +94,13 @@ public class GatewayAutoConfiguration {
 	@Configuration
 	@ConditionalOnClass(HttpClient.class)
 	protected static class NettyConfiguration {
-		@Bean // 1.2
+		@Bean
 		@ConditionalOnMissingBean
 		public HttpClient httpClient(@Qualifier("nettyClientOptions") Consumer<? super HttpClientOptions.Builder> options) {
 			return HttpClient.create(options);
 		}
 
-		@Bean // 1.1
+		@Bean
 		public Consumer<? super HttpClientOptions.Builder> nettyClientOptions() {
 			return opts -> {
 				opts.poolResources(PoolResources.elastic("proxy"));
@@ -72,101 +108,101 @@ public class GatewayAutoConfiguration {
 			};
 		}
 
-//		@Bean // 1.3
-//		public NettyRoutingFilter routingFilter(HttpClient httpClient) {
-//			return new NettyRoutingFilter(httpClient);
-//		}
-//
-//		@Bean // 1.4
-//		public NettyWriteResponseFilter nettyWriteResponseFilter() {
-//			return new NettyWriteResponseFilter();
-//		}
+		@Bean
+		public NettyRoutingFilter routingFilter(HttpClient httpClient) {
+			return new NettyRoutingFilter(httpClient);
+		}
 
-		@Bean // 1.5 {@link org.springframework.cloud.gateway.filter.WebsocketRoutingFilter}
+		@Bean
+		public NettyWriteResponseFilter nettyWriteResponseFilter() {
+			return new NettyWriteResponseFilter();
+		}
+
+		@Bean
 		public ReactorNettyWebSocketClient reactorNettyWebSocketClient(@Qualifier("nettyClientOptions") Consumer<? super HttpClientOptions.Builder> options) {
 			return new ReactorNettyWebSocketClient(options);
 		}
 	}
 
-	@Bean // 4.1
+	@Bean
 	@ConditionalOnMissingBean
 	public PropertiesRouteDefinitionLocator propertiesRouteDefinitionLocator(GatewayProperties properties) {
 		return new PropertiesRouteDefinitionLocator(properties);
 	}
 
-	@Bean // 4.2
+	@Bean
 	@ConditionalOnMissingBean(RouteDefinitionRepository.class)
 	public InMemoryRouteDefinitionRepository inMemoryRouteDefinitionRepository() {
 		return new InMemoryRouteDefinitionRepository();
 	}
 
-	@Bean // 4.3
-	@Primary // 优先被注入
+	@Bean
+	@Primary
 	public RouteDefinitionLocator routeDefinitionLocator(List<RouteDefinitionLocator> routeDefinitionLocators) {
 		return new CompositeRouteDefinitionLocator(Flux.fromIterable(routeDefinitionLocators));
 	}
 
-	@Bean // 4.4
+	@Bean
 	public RouteLocator routeDefinitionRouteLocator(GatewayProperties properties,
-												   List<GatewayFilterFactory> GatewayFilters,
-												   List<RoutePredicateFactory> predicates,
-												   RouteDefinitionLocator routeDefinitionLocator) {
+													List<GatewayFilterFactory> GatewayFilters,
+													List<RoutePredicateFactory> predicates,
+													RouteDefinitionLocator routeDefinitionLocator) {
 		return new RouteDefinitionRouteLocator(routeDefinitionLocator, predicates, GatewayFilters, properties);
 	}
 
-	@Bean // 4.5 // TODO 芋艿，where are you 【1】AdditionalRoutes 【2】customRouteLocator 【3】上面 routeDefinitionRouteLocator
+	@Bean
 	@Primary
 	public RouteLocator routeLocator(List<RouteLocator> routeLocators) {
 		return new CachingRouteLocator(new CompositeRouteLocator(Flux.fromIterable(routeLocators)));
 	}
 
-	@Bean // 2.6
+	@Bean
 	public FilteringWebHandler filteringWebHandler(List<GlobalFilter> globalFilters) {
 		return new FilteringWebHandler(globalFilters);
 	}
 
 	@Bean
 	public RoutePredicateHandlerMapping routePredicateHandlerMapping(FilteringWebHandler webHandler,
-																	   RouteLocator routeLocator) {
+																	 RouteLocator routeLocator) {
 		return new RoutePredicateHandlerMapping(webHandler, routeLocator);
 	}
 
 	// ConfigurationProperty beans
 
-	@Bean // 2.7
+	@Bean
 	public GatewayProperties gatewayProperties() {
 		return new GatewayProperties();
 	}
 
-	@Bean // 3.11 {@link SecureHeadersGatewayFilterFactory}
+	@Bean
 	public SecureHeadersProperties secureHeadersProperties() {
 		return new SecureHeadersProperties();
 	}
 
 	// GlobalFilter beans
 
-	@Bean // 2.1
+	@Bean
 	public RouteToRequestUrlFilter routeToRequestUrlFilter() {
 		return new RouteToRequestUrlFilter();
 	}
 
-	@Bean // 2.2
+	@Bean
 	@ConditionalOnBean(DispatcherHandler.class)
 	public ForwardRoutingFilter forwardRoutingFilter(DispatcherHandler dispatcherHandler) {
 		return new ForwardRoutingFilter(dispatcherHandler);
 	}
 
-	@Bean // 2.3
+	@Bean
 	public WebSocketService webSocketService() {
 		return new HandshakeWebSocketService();
 	}
 
-	@Bean // 2.4
+	@Bean
 	public WebsocketRoutingFilter websocketRoutingFilter(WebSocketClient webSocketClient, WebSocketService webSocketService) {
 		return new WebsocketRoutingFilter(webSocketClient, webSocketService);
 	}
 
-	@Bean // TODO 芋艿，需要确认下原因
+	/*@Bean
 	//TODO: default over netty? configurable
 	public WebClientHttpRoutingFilter webClientHttpRoutingFilter() {
 		//TODO: WebClient bean
@@ -176,73 +212,73 @@ public class GatewayAutoConfiguration {
 	@Bean
 	public WebClientWriteResponseFilter webClientWriteResponseFilter() {
 		return new WebClientWriteResponseFilter();
-	}
+	}*/
 
 	// Predicate Factory beans
 
-	@Bean // 3.15
+	@Bean
 	public AfterRoutePredicateFactory afterRoutePredicateFactory() {
 		return new AfterRoutePredicateFactory();
 	}
 
-	@Bean // 3.16
+	@Bean
 	public BeforeRoutePredicateFactory beforeRoutePredicateFactory() {
 		return new BeforeRoutePredicateFactory();
 	}
 
-	@Bean // 3.17
+	@Bean
 	public BetweenRoutePredicateFactory betweenRoutePredicateFactory() {
 		return new BetweenRoutePredicateFactory();
 	}
 
-	@Bean // 3.18
+	@Bean
 	public CookieRoutePredicateFactory cookieRoutePredicateFactory() {
 		return new CookieRoutePredicateFactory();
 	}
 
-	@Bean // 3.19
+	@Bean
 	public HeaderRoutePredicateFactory headerRoutePredicateFactory() {
 		return new HeaderRoutePredicateFactory();
 	}
 
-	@Bean // 3.20
+	@Bean
 	public HostRoutePredicateFactory hostRoutePredicateFactory() {
 		return new HostRoutePredicateFactory();
 	}
 
-	@Bean // 3.21
+	@Bean
 	public MethodRoutePredicateFactory methodRoutePredicateFactory() {
 		return new MethodRoutePredicateFactory();
 	}
 
-	@Bean // 3.22
+	@Bean
 	public PathRoutePredicateFactory pathRoutePredicateFactory() {
 		return new PathRoutePredicateFactory();
 	}
 
-	@Bean // 3.23
+	@Bean
 	public QueryRoutePredicateFactory queryRoutePredicateFactory() {
 		return new QueryRoutePredicateFactory();
 	}
 
-	@Bean // 3.24
+	@Bean
 	public RemoteAddrRoutePredicateFactory remoteAddrRoutePredicateFactory() {
 		return new RemoteAddrRoutePredicateFactory();
 	}
 
 	// GatewayFilter Factory beans
 
-	@Bean // 3.1
+	@Bean
 	public AddRequestHeaderGatewayFilterFactory addRequestHeaderGatewayFilterFactory() {
 		return new AddRequestHeaderGatewayFilterFactory();
 	}
 
-	@Bean // 3.2
+	@Bean
 	public AddRequestParameterGatewayFilterFactory addRequestParameterGatewayFilterFactory() {
 		return new AddRequestParameterGatewayFilterFactory();
 	}
 
-	@Bean // 3.3
+	@Bean
 	public AddResponseHeaderGatewayFilterFactory addResponseHeaderGatewayFilterFactory() {
 		return new AddResponseHeaderGatewayFilterFactory();
 	}
@@ -256,27 +292,27 @@ public class GatewayAutoConfiguration {
 		}
 	}
 
-	@Bean // 3.4
+	@Bean
 	public PrefixPathGatewayFilterFactory prefixPathGatewayFilterFactory() {
 		return new PrefixPathGatewayFilterFactory();
 	}
 
-	@Bean // 3.5
+	@Bean
 	public RedirectToGatewayFilterFactory redirectToGatewayFilterFactory() {
 		return new RedirectToGatewayFilterFactory();
 	}
 
-	@Bean // 3.6
+	@Bean
 	public RemoveNonProxyHeadersGatewayFilterFactory removeNonProxyHeadersGatewayFilterFactory() {
 		return new RemoveNonProxyHeadersGatewayFilterFactory();
 	}
 
-	@Bean // 3.7
+	@Bean
 	public RemoveRequestHeaderGatewayFilterFactory removeRequestHeaderGatewayFilterFactory() {
 		return new RemoveRequestHeaderGatewayFilterFactory();
 	}
 
-	@Bean // 3.8
+	@Bean
 	public RemoveResponseHeaderGatewayFilterFactory removeResponseHeaderGatewayFilterFactory() {
 		return new RemoveResponseHeaderGatewayFilterFactory();
 	}
@@ -293,30 +329,31 @@ public class GatewayAutoConfiguration {
 		return new RequestRateLimiterGatewayFilterFactory(rateLimiter, resolver);
 	}
 
-	@Bean // 3.9
+	@Bean
 	public RewritePathGatewayFilterFactory rewritePathGatewayFilterFactory() {
 		return new RewritePathGatewayFilterFactory();
 	}
 
-	@Bean // 3.10
+	@Bean
 	public SetPathGatewayFilterFactory setPathGatewayFilterFactory() {
 		return new SetPathGatewayFilterFactory();
 	}
 
-	@Bean // 3.12
+	@Bean
 	public SecureHeadersGatewayFilterFactory secureHeadersGatewayFilterFactory(SecureHeadersProperties properties) {
 		return new SecureHeadersGatewayFilterFactory(properties);
 	}
 
-	@Bean // 3.13
+	@Bean
 	public SetResponseHeaderGatewayFilterFactory setResponseHeaderGatewayFilterFactory() {
 		return new SetResponseHeaderGatewayFilterFactory();
 	}
 
-	@Bean // 3.14
+	@Bean
 	public SetStatusGatewayFilterFactory setStatusGatewayFilterFactory() {
 		return new SetStatusGatewayFilterFactory();
 	}
+
 
 	@ManagementContextConfiguration
 	@ConditionalOnProperty(value = "management.gateway.enabled", matchIfMissing = true)

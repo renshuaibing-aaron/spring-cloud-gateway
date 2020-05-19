@@ -15,7 +15,7 @@
  *
  */
 
-package org.springframework.cloud.gateway.sample;
+package com.aaron.ren.sample;
 
 import org.junit.Before;
 import org.junit.Test;
